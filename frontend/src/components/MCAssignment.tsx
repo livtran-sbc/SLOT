@@ -260,7 +260,7 @@ export default function MCAssignment() {
                       );
                     }}
                     disabled={
-                      tabInputs[tabNum].numSamples === null ||
+                      tabInputs[tabNum].numSamples === "" ||
                       rawContent === "" ||
                       tabInputs[tabNum].tableData !== ""
                     }
