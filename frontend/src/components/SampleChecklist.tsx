@@ -424,7 +424,7 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
           );
         } else {
           updateTabInputs(tabNum, { returnedData: data.diffDf });
-          evalDiffDf(data.diffDf);
+          evalDiffDf(data.diffDf, "vtTab");
         }
       } else {
         const error = await response.json();
@@ -475,6 +475,9 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
       if (response.ok) {
         const data = await response.json();
         updateTabInputs("ssoTab", { returnedData: data.compareRecords });
+        
+        evalDiffDf(data.compareRecords, "ssoTab");
+
       } else {
         const error = await response.json();
         console.log(error);
@@ -571,7 +574,6 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
     try {
       const params = new URLSearchParams({
         micronic_contents: JSON.stringify(tabInputs["ngsTab"].locationMicronicCodes),
-        sample_sheet_contents: JSON.stringify(tabInputs["ngsTab"].sampleSheetArray),
         run_number: tabInputs["ngsTab"].runNumber,
       });
 
@@ -580,7 +582,7 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
       if (response.ok) {
         const data = await response.json();
         updateTabInputs(tabNum, { returnedData: data.diffDf });
-        evalDiffDf(data.diffDf);
+        evalDiffDf(data.diffDf, "ngsTab");
       } else {
         const error = await response.json();
         console.log(error);
@@ -601,9 +603,14 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
   };
 
   // display mismatch UI
-  const evalDiffDf = (results: {'row number': number, 'location': string, 'database entry': string, 'micronic file entry': string, 'match': string}[]) => {
+  const evalDiffDf = (results: (
+    | { 'row number': number; location: string; 'database entry': string; 'micronic file entry': string; match: string }
+    | { 'location': string; 'micronic code': string; 'match': string }
+  )[], tab: TabStateTypes) => {
+    
+    const diffs = tab !== 'ssoTab' ? results.filter((obj) => obj.match === "FALSE") : results.filter((obj) => !['OK', 'NegativeControl', 'PositiveControl'].includes(obj.match))
 
-    const diffs = results.filter((obj) => obj.match === "FALSE");
+    //const diffs = results.filter((obj) => obj.match === "FALSE");
 
     if (diffs.length !== 0) {
       showError(
