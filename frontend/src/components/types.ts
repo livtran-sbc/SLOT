@@ -117,7 +117,7 @@ export type TabInputsTypes = {
   };
   queryDBTab: {
     returnedData: null;
-    selected: string;
+    selected: QueryTitle;
     inputValue: string;
     enterClicked: boolean;
   }
@@ -233,6 +233,12 @@ export type SampleNumberInputProps = Omit<
     field: string,
   ) => void;
 };
+
+export type QueryTitle =
+  | "None selected"
+  | "Extraction #"
+  | "Box Barcode #"
+  | "Sample #";
 
 export type TextInputQueryProps = {
   label: string;

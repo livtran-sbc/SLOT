@@ -1,12 +1,12 @@
 import { TextInputQuery, InputButton } from "./InputComponents";
 import { useTabData } from "./TabInputContext";
 import { CreateTable } from "./CreateTable";
-
+import { QueryTitle } from "./types";
 import { useErrorModal, ErrorMessage, ErrorModal } from "./ErrorComponents";
 
 import { SearchX } from "lucide-react";
 
-const queryTitles = {
+const queryTitles: Record<QueryTitle, string> = {
   "None selected": "None selected",
   "Extraction #": "Extraction Number",
   "Box Barcode #": "Box Barcode Number",
@@ -110,7 +110,7 @@ export default function QueryDatabase() {
               label="Enter"
               style="enter-button"
               handleClick={() => queryDatabase()}
-              disabled={tabInputs[tabNum].enterClicked}
+              disabled={tabInputs[tabNum].enterClicked || tabInputs[tabNum].inputValue === ""}
             />
             <InputButton
               label="Reset"
