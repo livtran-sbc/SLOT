@@ -147,7 +147,7 @@ export default function MCAssignment() {
               <div className="error-details-container">
                 <ErrorDetails
                   errorType={`Missing Quantification Values [${missingVals.length}]`}
-                  content={<CreateTable data={missingVals} />}
+                  content={<CreateTable data={missingVals} checkTable = {true}/>}
                 />
               </div>
             )}
