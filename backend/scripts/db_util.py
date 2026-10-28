@@ -1,15 +1,17 @@
-import os
 import pymssql
 import pandas as pd
 
 from datetime import datetime
 from scripts.queries import *
 
+
 class dbUtility:
 
     def __init__(self):
         self.mConn = self.db_connect('MTILDA')
         self.sConn = self.db_connect('SLOT')
+
+                                                                ##### GENERIC DB FUNCTIONS #####
 
     def db_connect(self, db):
 
@@ -18,14 +20,44 @@ class dbUtility:
             print('IN DEV -- SETTING ENVIRONMENT VARIABLES FOR {}'.format(db))
             set_env_vars()
 
-        conn = pymssql.connect(server= os.environ['{}_SERVER'.format(db)],
-                            user= os.environ['{}_USER'.format(db)],
-                            password=os.environ['{}_PW'.format(db)],
-                            database=os.environ['{}_DB_NAME'.format(db)])
+        conn = pymssql.connect(server=os.environ['{}_SERVER'.format(db)],
+                               user=os.environ['{}_USER'.format(db)],
+                               password=os.environ['{}_PW'.format(db)],
+                               database=os.environ['{}_DB_NAME'.format(db)])
 
         return conn
 
-                                                ##### MICRONIC CODE ASSIGNMENT DB FUNCTIONS #####
+    # generic context for DB query executions
+    def execute_get_db_query(self, db_pointer, query, params, table_cols=False, return_cols=True):
+
+        with db_pointer() as cursor:
+            cursor.execute(query, params)
+            res = cursor.fetchall()
+
+            if return_cols:
+                cols = [col for col in cursor.description]
+                # header formatting for query db functionalities
+                if table_cols:
+                    cols = [re.sub('_', ' ', col[0]) for col in cols]
+                return cols, res
+
+            return res
+
+    # generic function to insert records
+    # used for micronic code linking, location assignment,
+    # and writing NGS run information
+    def insert_records(self, table, values):
+
+        query = build_insert_query(table)
+
+        with self.sConn.cursor() as cursor:
+            cursor.executemany(query, values)
+            self.sConn.commit()
+            print('{} records inserted into {}!'.format(cursor.rowcount, table))
+
+####################################################################################################################################################################
+
+                                                                ##### VALIDATE MICRONIC CODE FUNCTIONS #####
 
     # wrapper for checking extraction number validity
     def check_extraction_numbers(self, extraction_numbers, db_ens):
@@ -50,14 +82,13 @@ class dbUtility:
     # tube_type is queried to check if the user is on the right tab when assigning
     # micronic codes
     def get_extraction_info(self, extraction_numbers):
+
         query = '''SELECT extraction_number, tube_type
                    FROM dbo.Dna_extractions
-                   WHERE extraction_number in ({})
+                   WHERE extraction_number IN %(extraction_numbers)s
         '''
 
-        with self.mConn.cursor() as cursor:
-            cursor.execute(query.format(extraction_numbers))
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.mConn.cursor, query, {"extraction_numbers": extraction_numbers.split(',')}, return_cols=False)
 
         derived_en = [i[0] for i in res]
         tube_types = [i[1] for i in res]
@@ -90,55 +121,21 @@ class dbUtility:
         query = '''
                 SELECT MT_DnaExtractionNumber, MicronicCode
                 FROM dbo.mc_dna_extraction_number
-                WHERE MT_DnaExtractionNumber in ({})
+                WHERE MT_DnaExtractionNumber in %(extraction_numbers)s
         '''
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query.format(','.join(extraction_numbers)))
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.sConn.cursor, query, {"extraction_numbers": extraction_numbers}, return_cols=False)
 
         en_linked = [str(i[0]) for i in res]
 
         # prepare returned data in row format for table creation in front-end
-        en_linked_rows = [{'linked extraction number': str(item[0]), 'linked micronic code':item[1]} for item in res]
+        en_linked_rows = [{'linked extraction number': str(item[0]), 'linked micronic code': item[1]} for item in res]
 
         return en_linked, en_linked_rows
 
-    # generic function to insert records
-    # used for micronic code linking, location assignment,
-    # and writing NGS run information
-    def insert_records(self, table, values):
+#####################################################################################################################################################################
 
-        query = build_insert_query(table)
-
-        with self.sConn.cursor() as cursor:
-            cursor.executemany(query, values)
-            self.sConn.commit()
-            print('{} records inserted into {}!'.format(cursor.rowcount, table))
-
-
-    # function to insert valid extraction numbers and their associated micronic code to the db
-    def insert_micronic_codes(self, table, rows, sample_type):
-
-        query = build_insert_query(table)
-
-        # insert sample type
-        # G = Genomic DNA
-        # C = Chimerism
-        dna_type = 'G' if sample_type == 'Genomic DNA' else 'C'
-
-        values = [(
-                  int(row['extraction number']),
-                  row['micronic code'],
-                   'WIN\\{}'.format(os.environ['WINDOWS_USERNAME']),
-                   datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-                    dna_type
-                   ) for row in rows]
-
-        with self.sConn.cursor() as cursor:
-            cursor.executemany(query, values)
-            self.sConn.commit()
-            print('{} records inserted into mc_dna_extraction_number!'.format(cursor.rowcount))
+                                                        ##### MICRONIC CODE SPECIFIC FUNCTIONS #####
 
     # check if purity ratio + dna concentration values were entered before linking for gDNA
     # DNA concentration only for chi sx
@@ -150,70 +147,88 @@ class dbUtility:
         query = '''
         SELECT extraction_number, {}
         FROM Dna_extractions
-        WHERE extraction_number in ({})
-        '''.format(', '.join(cols), ', '.join(extraction_numbers))
+        WHERE extraction_number in %(extraction_numbers)s
+        '''.format(', '.join(cols))
 
-        with self.mConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()
-            df_cols = [i[0] for i in cursor.description]
+        cols, res = self.execute_get_db_query(self.mConn.cursor, query, {"extraction_numbers": extraction_numbers}, return_cols=True, table_cols=True)
 
-        df = pd.DataFrame(res, columns= df_cols)
+        df = pd.DataFrame(res, columns=cols)
 
-        # replace NaNs (NULL in database) with string 'None'
+        # replace NaNs (NULL in database) and empty strings with ""
+        # these will be populated with the MISSING style on the front end
 
         # turn all columns in df to string data type for JSON serialization -- integers will be coerced to
         # string anyway
-        missing_vals = df[df[cols].isna().any(axis=1)]
-        missing_vals = missing_vals.where(pd.notnull(missing_vals), 'None').astype(str)
+        # blanks and NULL will be captured as missing values
+        is_blank = df.isna() | df.astype(str).apply(lambda s: s.str.strip().eq(''))
+        missing_vals = df[is_blank.any(axis=1)]
+        missing_vals = missing_vals.where(~is_blank, '').astype(str)
+
         missing_vals.columns = missing_vals.columns.str.replace('_', ' ')
 
         return missing_vals
 
-                                    ##### FREEZER BOX BARCODE DB FUNCTIONS #####
+    # function to insert valid extraction numbers and their associated micronic code to the db
+    def insert_micronic_codes(self, table, rows, sample_type):
+        query = build_insert_query(table)
+
+        # insert sample type
+        # G = Genomic DNA
+        # C = Chimerism
+        dna_type = 'G' if sample_type == 'Genomic DNA' else 'C'
+
+        values = [(
+            int(row['extraction number']),
+            row['micronic code'],
+            'WIN\\{}'.format(os.environ['WINDOWS_USERNAME']),
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+            dna_type
+        ) for row in rows]
+
+        with self.sConn.cursor() as cursor:
+            cursor.executemany(query, values)
+            self.sConn.commit()
+            print('{} records inserted into mc_dna_extraction_number!'.format(cursor.rowcount))
+
+#####################################################################################################################################################################
+
+                                ##### FREEZER BOX BARCODE ASSIGNMENT DB FUNCTIONS #####
 
     # function to get previous box, box currently being assigned, and future box
     def get_fb_info(self, table):
-
-        # save current pk so warning can be returned if freezer is down to last 10 boxes
-        # current freezer is V1 with 654 boxes
-        current_pk = ''
 
         query = '''
             --current box PK
             SELECT TOP 1
             fb.PK, fb.BoxName,
             --previous box barcode and box name
-            (SELECT TOP 1 BoxBarcode FROM dbo.{} where PK < fb.PK ORDER BY PK DESC) as prev_barcode,
-            (SELECT TOP 1 BoxName FROM dbo.{} where PK < fb.PK ORDER BY PK DESC) as prev_box,
+            (SELECT TOP 1 BoxBarcode FROM dbo.{db_table} where PK < fb.PK ORDER BY PK DESC) as prev_barcode,
+            (SELECT TOP 1 BoxName FROM dbo.{db_table} where PK < fb.PK ORDER BY PK DESC) as prev_box,
             --future box
-            (SELECT TOP 1 BoxName FROM dbo.{} where PK > fb.PK ORDER BY PK ASC) as future_box
-            FROM dbo.{} fb
+            (SELECT TOP 1 BoxName FROM dbo.{db_table} where PK > fb.PK ORDER BY PK ASC) as future_box
+            FROM dbo.{db_table} fb
             WHERE fb.BoxBarcode IS NULL
             ORDER BY fb.PK
-        '''.format(table, table, table, table)
+        '''.format(db_table=table)
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()[0]
+        res = self.execute_get_db_query(self.sConn.cursor, query, "", return_cols=False)[0]
 
         return res
 
-    # function to assign the entered barcode to the next box
-    def update_fb_barcode(self, barcode, table, box):
+    # function to return the remaining number of unassigned boxes after the new box has been assigned
+    def get_remaining_num_boxes(self, freezer_name, table):
 
         query = '''
-            UPDATE {}
-            SET BoxBarcode = '{}' 
-            WHERE BoxName = '{}'
-        '''.format(table, barcode, box)
+        SELECT COUNT(*) 
+        FROM dbo.{}
+        WHERE freezer = '{}' AND BoxBarcode IS NULL
+        '''.format(table, freezer_name)
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            self.sConn.commit()
-            print('{} records updated in {}!'.format(cursor.rowcount, table))
+        res = self.execute_get_db_query(self.sConn.cursor, query, "", return_cols=False)[0][0]
 
-    # function to check if the current box that was just assigned is one of the last 10 boxes
+        return res
+
+    # function to check if the current box that was just assigned is one of the last 24 boxes
     def check_last_boxes(self, box_name, query_table):
 
         freezer = box_name.split('_')[0]
@@ -226,42 +241,39 @@ class dbUtility:
         else:
             return ''
 
-    # function to return the remaining number of unassigned boxes after the new box has been assigned
-    def get_remaining_num_boxes(self, freezer_name, table):
+    # function to assign the entered barcode to the next box
+    def update_fb_barcode(self, barcode, table, box):
 
         query = '''
-        SELECT COUNT(*) 
-        FROM dbo.{}
-        WHERE freezer = '{}' AND BoxBarcode IS NULL
-        '''.format(table, freezer_name)
+            UPDATE {}
+            SET BoxBarcode = %(barcode)s 
+            WHERE BoxName = '{}'
+        '''.format(table, box)
 
         with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()[0][0]
+            cursor.execute(query, {"barcode": barcode})
+            self.sConn.commit()
+            print('{} records updated in {}!'.format(cursor.rowcount, table))
 
-        return res
 
-                                                ##### FREEZER LOCATION ASSIGNMENT DB FUNCTIONS / SAMPLE CHECKLIST #####
+#####################################################################################################################################################################
+
+                                            ##### FREEZER LOCATION ASSIGNMENT DB FUNCTIONS / SAMPLE CHECKLIST #####
 
     # function to get associated extraction numbers with scanned in micronic codes
     def get_extraction_numbers(self, codes):
 
-        #initialize valid Boolean. If any codes are missing, change to False
+        # initialize valid Boolean. If any codes are missing, change to False
         valid = True
         codes = codes.split(',')
-        print(codes)
-        in_values = ",".join(["'{}'".format(i) for i in codes])
 
         query = '''
         SELECT MT_DnaExtractionNumber, MicronicCode
         FROM dbo.mc_dna_extraction_number
-        WHERE MicronicCode IN ({})
-        '''.format(in_values)
+        WHERE MicronicCode IN %(codes)s
+        '''
 
-        print(query)
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.sConn.cursor, query, {"codes": codes}, return_cols=False)
 
         if len(res) != 0:
             # if all micronic codes were found, return linked records (list of objects) with micronic code and
@@ -292,37 +304,31 @@ class dbUtility:
         assigned_codes = ''
         valid = True
 
-        # pre-format micronic codes for querying using IN
-        in_codes = ",".join(["'{}'".format(i) for i in micronic_codes])
-
         query = ''' 
         SELECT fb.BoxName, mtb.Location, mtb.MicronicCode, mcen.MT_DnaExtractionNumber
-        FROM dbo.{}_micronic_tubes mtb
-        INNER JOIN dbo.{}_freezer_boxes fb
+        FROM dbo.{tab}_micronic_tubes mtb
+        INNER JOIN dbo.{tab}_freezer_boxes fb
         ON mtb.FK_FreezerBox = fb.PK
         LEFT JOIN dbo.mc_dna_extraction_number mcen
 		ON mtb.MicronicCode = mcen.MicronicCode
-        WHERE mtb.MicronicCode IN ({})
-        '''.format(tab_prefix, tab_prefix, in_codes)
+        WHERE mtb.MicronicCode IN %(micronic_codes)s
+        '''.format(tab=tab_prefix)
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.sConn.cursor, query, {"micronic_codes": micronic_codes}, return_cols=False)
 
-        print(res)
         # if the query returns results, it means a scanned in micronic code has already been assigned a location
         if res:
             valid = False
 
             # sort by order of appearance in micronic codes
             code_order = {code: i for i, code in enumerate(micronic_codes)}
-            res = sorted(res, key= lambda x: code_order[x[2]])
+            res = sorted(res, key=lambda x: code_order[x[2]])
 
-            assigned_codes = [{'location':i[0]+'/'+i[1], 'micronic code':i[2], 'extraction number':i[3]} for i in res]
+            assigned_codes = [{'location': i[0] + '/' + i[1], 'micronic code': i[2], 'extraction number': i[3]} for i in res]
 
         return assigned_codes, valid
 
-    # function to check if provided freezer boxbarcode is valid
+    # function to check if provided freezer box barcode is valid
     def check_freezer_barcode(self, table_type, fb_barcode):
 
         valid = True
@@ -330,12 +336,10 @@ class dbUtility:
         query = '''
         SELECT PK, BoxName
         FROM {}_freezer_boxes
-        WHERE BoxBarcode = '{}'
-        '''.format(table_type, fb_barcode)
+        WHERE BoxBarcode = %(barcode)s
+        '''.format(table_type)
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.sConn.cursor, query, {"barcode": fb_barcode}, return_cols=False)
 
         if len(res) == 0:
             valid = False
@@ -347,15 +351,6 @@ class dbUtility:
     # if nothing is returned, that means it's a new box!
     def get_occupied_positions(self, table_type, fb_barcode):
 
-        # query = '''
-        # SELECT TOP 1 fb.PK, mt.location, fb.BoxName
-        # FROM dbo.{}_freezer_boxes fb
-        # INNER JOIN dbo.{}_micronic_tubes mt
-        # ON fb.PK = mt.FK_FreezerBox
-        # WHERE fb.BoxBarcode = '{}'
-        # ORDER BY Location DESC
-        # '''.format(table_type, table_type, fb_barcode)
-
         query = '''
             WITH last_position AS (SELECT TOP 1 tubes.Location
             FROM {dna}_micronic_tubes tubes
@@ -363,7 +358,7 @@ class dbUtility:
             ON fb.PK = tubes.FK_FreezerBox
             LEFT JOIN ngs_dilution_sample_map map
             ON tubes.Location = map.PositionName
-            WHERE fb.BoxBarcode = {barcode}
+            WHERE fb.BoxBarcode = %(barcode)s
             ORDER by map.pk DESC)
 
             SELECT positionname
@@ -373,11 +368,9 @@ class dbUtility:
             WHERE PositionName = (SELECT location FROM last_position))
         '''
 
-        query = query.format(dna=table_type, barcode=fb_barcode)
+        query = query.format(dna=table_type)
 
-        with self.sConn.cursor() as cursor:
-            cursor.execute(query)
-            res = cursor.fetchall()
+        res = self.execute_get_db_query(self.sConn.cursor, query, {"barcode" : fb_barcode}, return_cols= False)
 
         if len(res) == 0:
             return ''
@@ -393,17 +386,17 @@ class dbUtility:
         query = build_insert_query(table)
 
         values = [(
-                    # FK_FreezerBox
-                    pk,
-                    # Location,
-                    row['location'],
-                    # MicronicCode
-                    row['micronic code'],
-                    # RecordCreatedWhen
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-                    # RecordCreatedBy
-                   'WIN\\{}'.format(os.environ['WINDOWS_USERNAME'])
-                   ) for row in rows]
+            # FK_FreezerBox
+            pk,
+            # Location,
+            row['location'],
+            # MicronicCode
+            row['micronic code'],
+            # RecordCreatedWhen
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+            # RecordCreatedBy
+            'WIN\\{}'.format(os.environ['WINDOWS_USERNAME'])
+        ) for row in rows]
 
         with self.sConn.cursor() as cursor:
             cursor.executemany(query, values)
@@ -429,6 +422,10 @@ class dbUtility:
             self.mConn.commit()
             print('{} records updated in Dna_extractions!'.format(cursor.rowcount))
 
+#####################################################################################################################################################################
+
+                                                            ##### VERIFY TUBE LOCATION DB FUNCTIONS #####
+
     # function to get all samples in a given box
     # used for verify tube location functionality
     def get_box_contents(self, fb_pk, prefix):
@@ -446,6 +443,10 @@ class dbUtility:
         box_contents = pd.DataFrame(res, columns=['location', 'database entry'])
 
         return box_contents
+
+#####################################################################################################################################################################
+
+                                                            ##### NGS DB FUNCTIONS #####
 
     # function to get the last used run number for NGS
     def get_prev_run_number(self):
@@ -485,9 +486,7 @@ class dbUtility:
 
         df = pd.DataFrame(res, columns=['micronic code', 'dna extraction number', 'database entry', 'seq'])
 
-        return(df)
-
-    def get_database_query(self, query_type, input, sample = ""):
+        return df
 
         import re
 
