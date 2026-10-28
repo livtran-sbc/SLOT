@@ -27,6 +27,26 @@ async def exception_handler(request: Request, e: Exception):
     print('Exception occurred due to: {}'.format(str(e)))
     return JSONResponse(status_code = 500, content={'detail': str(e)})
 
+#####################################################################################################################################################################
+                                                                    ##### UTIL API - VALIDATE MC #####
+
+# check that the micronic codes in the provided file are not already linked to another sample and that it
+# is linked to an extraction number
+@app.get('/api/validate-micronic-file')
+def validate_micronic_file(micronic_codes: str):
+
+    # check if micronic code exists (i.e. has it been linked? or was the code scanned in incomplete?) and get extraction number
+    # returns a list of objects with extraction number and associated micronic code if all codes are valid and False
+    # returns a list of invalid micronic codes, if any/all codes are invalid and True
+    data, validity_check = db.get_extraction_numbers(micronic_codes)
+
+    return {
+        'valid': validity_check,
+        'results': data
+    }
+
+#####################################################################################################################################################################
+                                                                            ##### ASSIGN MC #####
 # write requests involving micronic tubes
 class MicronicWriteRequests(BaseModel):
     table: str
@@ -95,6 +115,8 @@ def link_micronic_codes(request: MicronicWriteRequests):
         'tabCheck': valid_tab
     }
 
+#####################################################################################################################################################################
+                                                            ##### ASSIGN FREEZER BOX BARCODE #####
 class FBWriteRequests(BaseModel):
     freezer_box_table: str
     entered_barcode: str
@@ -114,7 +136,6 @@ def assign_freezer_barcode(request: FBWriteRequests):
     # else returns a string with the freezer name and number of boxes left for the freezer
     last_boxes = db.check_last_boxes(current_box_name, table)
 
-
     return {
         'boxInfo': {
             'previousBox': (prev_box_name, prev_box_barcode),
@@ -124,36 +145,14 @@ def assign_freezer_barcode(request: FBWriteRequests):
         'lastBox': last_boxes
     }
 
-# check that the micronic codes in the provided file are not already linked to another sample and that it
-# is linked to an extraction number
-@app.get('/api/validate-micronic-file')
-def validate_micronic_file(micronic_codes: str):
-
-    # check if micronic code exists (i.e. has it been linked? or was the code scanned in incomplete?) and get extraction number
-    # returns a list of objects with extraction number and associated micronic code if all codes are valid and False
-    # returns a list of invalid micronic codes, if any/all codes are invalid and True
-    data, validity_check = db.get_extraction_numbers(micronic_codes)
-
-    return {
-        'valid': validity_check,
-        'results': data
-    }
+#####################################################################################################################################################################
+                                                                    ##### ASSIGN LOCATION #####
 
 # both micronic code and freezer box elements are needed to assign freezer location
 class FreezerMicronicWriteRequests(BaseModel):
     en_mcodes: List[TypedDict("CodesExNumDict", {"extraction number": int, "micronic code": str, 'location': str})]
     barcode: str
     dna_type: str
-
-    # get last populated slot in current box
-
-    # get next slots based on number of samples provided
-    # determine if remaining slots exceeds number of samples provided -- if yes, output error message and do not assign
-    # otherwise, assign new locations
-        # write to <sample_type>_micronic_tubes
-        # write location to Dna.extractions table in mTilda using the derived extraction number
-        # location is <box_naame>_<slot>
-
 
 @app.post('/api/assign-freezer-location')
 def assign_freezer_location(request: FreezerMicronicWriteRequests):
@@ -181,7 +180,6 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
 
         # occupied slots in existing box
         filled_slots = db.get_occupied_positions(table_prefix, barcode)
-        last_location = filled_slots[len(filled_slots)-1]
 
         num_occupied_slots = len(filled_slots)
 
@@ -200,8 +198,6 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
             fb_pk, box = fb_details
 
             from scripts.data_util import dataUtil
-
-            dataUtil = dataUtil()
 
             num_slots_valid = (num_occupied_slots + len(new_slots)) <= 96
 
@@ -255,6 +251,8 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
         'results': data
     }
 
+#####################################################################################################################################################################
+                                                                ##### VERIFY TUBE LOCATION#####
 
 @app.get('/api/verify-tube-location')
 def verify_tube_location(micronic_contents: str, barcode: str, sample_type: str):
@@ -274,7 +272,6 @@ def verify_tube_location(micronic_contents: str, barcode: str, sample_type: str)
 
         from scripts.data_util import dataUtil
 
-        dataUtil = dataUtil()
         diff_df = dataUtil.create_diff_df(box_contents, micronic_file_contents, join_on='location', df2_col= 'micronic code')
         diff_df.insert(0, "row number", range(1, len(diff_df) + 1))
 
@@ -283,6 +280,8 @@ def verify_tube_location(micronic_contents: str, barcode: str, sample_type: str)
         'diffDf': diff_df.to_dict(orient='records') if len(diff_df) != 0 else diff_df
     }
 
+#####################################################################################################################################################################
+                                                                    ##### SSO #####
 class ProcessSSORequests(BaseModel):
     mcFileName: str
     mcContent: str
@@ -340,6 +339,8 @@ def sso_verification(request: ProcessSSORequests):
         'compareRecords': compare_records
     }
 
+#####################################################################################################################################################################
+                                                                    ##### NGS #####
 class NGSUploadRequest(BaseModel):
     sampleSheetContent: str
 
@@ -378,6 +379,7 @@ def upload_ngs_run_info(request: NGSUploadRequest):
                 row['FK_TestMtilda'],
                 row['DnaExtractionNumber']
                    ) for row in df_dict]
+
         # write to db
         print('records inserted -- temp')
         db.insert_records('ngs_run_info', values)
