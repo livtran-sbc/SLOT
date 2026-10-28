@@ -11,6 +11,7 @@ pandas = "*"
 pymssql = "*"
 pyyaml = "*"
 python-multipart = "*"
+uvicorn = "*"
 
 [dev-packages]
 
