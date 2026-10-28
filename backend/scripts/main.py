@@ -35,7 +35,7 @@ class MicronicWriteRequests(BaseModel):
 
 @app.post('/api/link-micronic-codes')
 def link_micronic_codes(request: MicronicWriteRequests):
-    #[{'location': 'A01', 'micronic code': '8077691808', 'extraction number': '123'}, {'location': 'B01', 'micronic code': '8078532760', 'extraction number': '123'}, {'location': 'C01', 'micronic code': '8077691868', 'extraction number': '123'}]
+
     rows = request.rows
     table = request.table
     sample_type = request.dna_type
@@ -82,7 +82,7 @@ def link_micronic_codes(request: MicronicWriteRequests):
                        'WIN\\{}'.format(os.environ['WINDOWS_USERNAME']),
                        datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
                         dna_type
-                       ) for row in rows]
+                       ) for row in valid_rows]
 
             db.insert_records(table, values)
 
