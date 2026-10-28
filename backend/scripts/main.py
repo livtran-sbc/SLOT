@@ -328,9 +328,10 @@ def sso_verification(request: ProcessSSORequests):
             barcode_compare_file = "{}/BarcodeResults_{}.csv".format(barcode_path, date.today())
 
             with open(barcode_compare_file, newline='') as f:
-                reader = csv.DictReader(f)
+                reader = csv.DictReader(f, fieldnames= ["location", 'micronic code', 'match'])
+                # skip header row
+                next(reader)
                 compare_records = list(reader)
-                print(compare_records)
 
         except subprocess.CalledProcessError as e:
             raise Exception("Process failed due to: {}".format(e.stderr))
