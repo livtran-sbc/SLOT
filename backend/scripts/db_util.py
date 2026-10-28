@@ -1,5 +1,6 @@
 import pymssql
 import pandas as pd
+import re
 
 from datetime import datetime
 from scripts.queries import *
@@ -488,40 +489,100 @@ class dbUtility:
 
         return df
 
-        import re
+#####################################################################################################################################################################
 
-        query, params = database_sql_queries.get(query_type)
+                                                            ##### QUERY DB FUNCTIONS #####
 
-        if query_type == "Extraction #":
+    # QUERY DB - EXTRACTION NUMBER
+    def execute_db_extraction_num(self, input, sample):
 
-            cols = '{dna_cols}, TRIM(dna_concentration) as dna_concentration'
+        if sample == 'Genomic DNA':
+            cols = 'purity_ratio'
+            sample_type = 'G'
+        else:
+            cols = 'purity_ratio, tube_type as subset'
+            sample_type = 'C'
 
-            if sample == 'Genomic DNA':
-                cols = 'purity_ratio'
-            else:
-                cols = 'purity_ratio, tube_type as subset'
+        cols = 'purity_ratio, TRIM(dna_concentration) as dna_concentration' if sample == 'Genomic DNA' else 'TRIM(dna_concentration) as dna_concentration'
 
-            cols = 'purity_ratio, TRIM(dna_concentration) as dna_concentration' if sample == 'Genomic DNA' else 'TRIM(dna_concentration) as dna_concentration'
-            query = query.format(dna_cols=cols)
+        # SLOT query
+        query = '''SELECT CAST(MT_DNAExtractionNumber AS varchar) as extraction_number, MicronicCode AS micronic_code
+                    FROM mc_dna_extraction_number
+                    WHERE MT_DnaExtractionNumber = %(extraction_number)s
+                    AND SampleType = '{}'
+                '''.format(sample_type)
 
-        elif query_type == "Box Barcode #":
-            dna_type = 'gdna' if sample == 'Genomic DNA' else 'chi'
-            query = query.format(prefix=dna_type)
+        slot_return = self.execute_get_db_query(self.sConn.cursor, query, {"extraction_number": input}, True)
 
-        db_conn = self.mConn.cursor()
+        # mTilda query
+        query = '''SELECT CAST(extraction_number AS varchar) as extraction_number, CAST(sample_number AS varchar) AS sample_number, {dna_cols}, location
+                   FROM dna_extractions
+                   WHERE extraction_number = %(extraction_number)s
+        '''.format(dna_cols=cols)
 
-        if query_type == 'Box Barcode #':
-            db_conn = self.sConn.cursor()
+        mtilda_return = self.execute_get_db_query(self.mConn.cursor, query, {"extraction_number": input}, True)
 
-        vals = {
-            "input": input,
-        }
+        records = pd.DataFrame(slot_return[1], columns=slot_return[0]).merge(pd.DataFrame(mtilda_return[1], columns=mtilda_return[0])).drop(columns="extraction number").to_dict(orient='records')
 
-        with db_conn as cursor:
-            cursor.execute(query, params(vals))
-            res = cursor.fetchall()
+        return records
 
-            cols = [re.sub('_', ' ', col[0]) for col in cursor.description]
-            records = [dict(zip(cols, row)) for row in res]
+    # QUERY DB - SAMPLE NUMBER
+    def execute_db_sample_num(self, input):
+
+        query='''SELECT tube_type as subset, CAST(extraction_number AS varchar) AS extraction_number, location
+                    FROM dna_extractions
+                    WHERE sample_number = %(sample_number)s'''
+
+        mtilda_return = self.execute_get_db_query(self.mConn.cursor, query, {"sample_number": input}, True)
+
+        # use extraction numbers from sample to look up micronic codes
+        extraction_numbers = [i[1] for i in mtilda_return[1]]
+
+        query = '''
+                    SELECT CAST(MT_DnaExtractionNumber AS varchar) AS extraction_number, MicronicCode AS micronic_code
+                    FROM mc_dna_extraction_number
+                    WHERE MT_DnaExtractionNumber IN %(extraction_number)s
+                  '''
+
+        slot_return = self.execute_get_db_query(self.sConn.cursor, query, {"extraction_number": extraction_numbers}, True)
+
+        # combine the two returns by converting to panda df and merging by extraction number
+        # convert to records
+        records = pd.DataFrame(mtilda_return[1], columns=mtilda_return[0]).merge(pd.DataFrame(slot_return[1], columns=slot_return[0]), on="extraction number").to_dict(orient='records')
+
+        return records
+
+    # QUERY DB - BOX BARCODE NUMBER
+    def execute_db_box_barcode(self, input, sample):
+
+        dna_type = 'gdna' if sample == 'Genomic DNA' else 'chi'
+
+        query = '''SELECT e.MT_DnaExtractionNumber as extraction_number, t.MicronicCode as micronic_code, b.boxname as box, t.location
+                    FROM {prefix}_freezer_boxes b
+                    INNER JOIN {prefix}_micronic_tubes t
+                    ON b.pk = t.FK_FreezerBox
+                    INNER JOIN mc_dna_extraction_number e
+                    ON t.MicronicCode = e.MicronicCode
+                    WHERE BoxBarcode = %(barcode)s
+                    ORDER BY t.location'''
+
+        query = query.format(prefix=dna_type)
+
+        cols, rows = self.execute_get_db_query(self.sConn.cursor, query, {"barcode": input}, True)
+
+        records = [dict(zip(cols, row)) for row in rows]
+
+        return records
+
+    # wrapper function for getting and formatting tables from selected query type
+    def get_database_records(self, query_type, input, sample=""):
+
+        match query_type:
+            case "Extraction #":
+                records = self.execute_db_extraction_num(input, sample)
+            case "Box Barcode #":
+                records = self.execute_db_box_barcode(input, sample)
+            case "Sample #":
+                records = self.execute_db_sample_num(input)
 
         return records

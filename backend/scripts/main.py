@@ -414,10 +414,12 @@ def check_ngs_tray(micronic_contents: str, sample_sheet_contents: str, run_numbe
         'diffDf': diff_df.to_dict(orient='records') if len(diff_df) != 0 else diff_df
     }
 
+#####################################################################################################################################################################
+                                                                ##### QUERY DATABASE #####
 @app.get('/api/query-db')
 def query_database(query_type: str, input: str, sample_type: str):
 
-    data = db.get_database_query(query_type, input, sample_type)
+    data = db.get_database_records(query_type, input, sample_type)
 
     if len(data) == 0:
         data = "No results returned"
@@ -425,4 +427,3 @@ def query_database(query_type: str, input: str, sample_type: str):
     return {
         'table': data
     }
-
