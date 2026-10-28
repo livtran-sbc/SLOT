@@ -108,7 +108,7 @@ def assign_freezer_barcode(request: FBWriteRequests):
     (current_pk, current_box_name, prev_box_barcode, prev_box_name, future_box_name) = db.get_fb_info(table)
 
     # update barcode in table
-    #db.update_fb_barcode(barcode, table, current_box_name)
+    db.update_fb_barcode(barcode, table, current_box_name)
 
     # returns '' if not less 24 boxes
     # else returns a string with the freezer name and number of boxes left for the freezer
@@ -380,7 +380,7 @@ def upload_ngs_run_info(request: NGSUploadRequest):
                    ) for row in df_dict]
         # write to db
         print('records inserted -- temp')
-        #db.insert_records('ngs_run_info', values)
+        db.insert_records('ngs_run_info', values)
     else:
         number_of_samples = len(df)
 
