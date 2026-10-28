@@ -390,10 +390,9 @@ def upload_ngs_run_info(request: NGSUploadRequest):
     }
 
 @app.get('/api/check-ngs-tray')
-def check_ngs_tray(micronic_contents: str, sample_sheet_contents: str, run_number: int):
+def check_ngs_tray(micronic_contents: str, run_number: int):
 
     micronic_contents = json.loads(micronic_contents)
-    sample_sheet_contents = json.loads(sample_sheet_contents)
 
     # get determined positions based on NGS sample sheet upload
     ngs_df = db.get_ngs_positions(run_number)
