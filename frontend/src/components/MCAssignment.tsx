@@ -135,7 +135,7 @@ export default function MCAssignment() {
             {invalidLinks.length > 0 && (
               <div className="error-details-container">
                 <ErrorDetails
-                  errorType={`Already Linked Micronic Codes [${invalidLinks.length}]`}
+                  errorType={`Already Linked Extraction Numbers [${invalidLinks.length}]`}
                   content={<CreateTable data={invalidLinks} />}
                 />
               </div>
