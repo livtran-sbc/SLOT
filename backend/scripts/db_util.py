@@ -1,8 +1,11 @@
 import pymssql
 import pandas as pd
 import re
+import json
 
 from datetime import datetime
+
+from scripts.logger import get_logger
 from scripts.queries import *
 
 
@@ -11,15 +14,11 @@ class dbUtility:
     def __init__(self):
         self.mConn = self.db_connect('MTILDA')
         self.sConn = self.db_connect('SLOT')
+        self.logger = get_logger()
 
                                                                 ##### GENERIC DB FUNCTIONS #####
 
     def db_connect(self, db):
-
-        if 'SERVER' not in os.environ:
-            from config.set_creds import set_env_vars
-            print('IN DEV -- SETTING ENVIRONMENT VARIABLES FOR {}'.format(db))
-            set_env_vars()
 
         conn = pymssql.connect(server=os.environ['{}_SERVER'.format(db)],
                                user=os.environ['{}_USER'.format(db)],
@@ -30,6 +29,8 @@ class dbUtility:
 
     # generic context for DB query executions
     def execute_get_db_query(self, db_pointer, query, params, table_cols=False, return_cols=True):
+
+        self.logger.info("Executing DB Query...")
 
         with db_pointer() as cursor:
             cursor.execute(query, params)
@@ -42,7 +43,9 @@ class dbUtility:
                     cols = [re.sub('_', ' ', col[0]) for col in cols]
                 return cols, res
 
-            return res
+        self.logger.info("DB Query successfully executed!")
+
+        return res
 
     # generic function to insert records
     # used for micronic code linking, location assignment,
@@ -54,7 +57,23 @@ class dbUtility:
         with self.sConn.cursor() as cursor:
             cursor.executemany(query, values)
             self.sConn.commit()
-            print('{} records inserted into {}!'.format(cursor.rowcount, table))
+            self.logger.info('{} record(s) inserted into {}!'.format(cursor.rowcount, table))
+
+    # function to log audit events in the 'audit_log' table
+    def insert_audit_record(self, function, inputs, status="success", error_message=None, other_messages=None):
+
+        event_details = {
+            "function": function,
+            "inputs": inputs,
+        }
+
+        if status != "success":
+            event_details["error_message"] = error_message
+
+        if other_messages is not None:
+            event_details[other_messages[0]] = other_messages[1]
+
+        self.insert_records('audit_log', [(re.sub('_', ' ', function).title(), json.dumps(event_details, default=str), os.environ['WINDOWS_USERNAME'], datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], status)])
 
 ####################################################################################################################################################################
 
@@ -76,7 +95,7 @@ class dbUtility:
             # codes
             all_valid_en = [i for i in valid_en if i not in existing_links]
         else:
-            print('All extraction numbers entered were invalid!')
+            self.logger.warning('All extraction numbers entered were invalid!')
 
         return invalid_en, existing_links_rows, all_valid_en
 
@@ -105,15 +124,25 @@ class dbUtility:
     # column are genomic dna samples
     def check_extraction_number_valid(self, extraction_numbers, db_extraction_numbers):
 
+        self.logger.warning("Checking validity of provided extraction numbers...")
+
         extraction_numbers_split = [num for num in extraction_numbers.split(',')]
 
         valid_extraction_numbers = [str(i) for i in db_extraction_numbers]
 
+        self.logger.info('Valid extraction numbers: {}'.format(valid_extraction_numbers))
+
         if len(valid_extraction_numbers) != len(extraction_numbers_split):
+
             invalid = [num for num in extraction_numbers_split if num not in valid_extraction_numbers]
+
+            self.logger.info('Invalid extraction numbers: {}'.format(invalid))
+
             #  structure needed to create table in JS
             invalid_records = [{'invalid extraction numbers': n} for n in invalid]
+
             return invalid_records, valid_extraction_numbers
+
         return [], valid_extraction_numbers
 
     # function to check if the provided extraction number is already linked to another micronic code
@@ -128,6 +157,9 @@ class dbUtility:
         res = self.execute_get_db_query(self.sConn.cursor, query, {"extraction_numbers": extraction_numbers}, return_cols=False)
 
         en_linked = [str(i[0]) for i in res]
+
+        if en_linked:
+            self.logger.warning("Already Linked Extraction Numbers Detected: {}".format(en_linked))
 
         # prepare returned data in row format for table creation in front-end
         en_linked_rows = [{'linked extraction number': str(item[0]), 'linked micronic code': item[1]} for item in res]
@@ -181,7 +213,7 @@ class dbUtility:
         values = [(
             int(row['extraction number']),
             row['micronic code'],
-            'WIN\\{}'.format(os.environ['WINDOWS_USERNAME']),
+            os.environ['WINDOWS_USERNAME'],
             datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
             dna_type
         ) for row in rows]
@@ -238,12 +270,16 @@ class dbUtility:
         remaining_boxes = self.get_remaining_num_boxes(freezer, query_table)
 
         if remaining_boxes <= 24:
-            return 'Remaining Boxes for {}: {}'.format(freezer, remaining_boxes)
+            message = 'Remaining Boxes for {}: {}'.format(freezer, remaining_boxes)
+            self.logger.info(message)
+            return message
         else:
             return ''
 
     # function to assign the entered barcode to the next box
     def update_fb_barcode(self, barcode, table, box):
+
+        self.logger.info("Setting {} as the box barcode in {}...".format(barcode, table))
 
         query = '''
             UPDATE {}
@@ -254,7 +290,7 @@ class dbUtility:
         with self.sConn.cursor() as cursor:
             cursor.execute(query, {"barcode": barcode})
             self.sConn.commit()
-            print('{} records updated in {}!'.format(cursor.rowcount, table))
+            self.logger.info('{} records updated in {}!'.format(cursor.rowcount, table))
 
 
 #####################################################################################################################################################################
@@ -268,6 +304,8 @@ class dbUtility:
         valid = True
         codes = codes.split(',')
 
+        self.logger.info("Retrieving extraction information from Micronic Codes...")
+
         query = '''
         SELECT MT_DnaExtractionNumber, MicronicCode
         FROM dbo.mc_dna_extraction_number
@@ -277,6 +315,9 @@ class dbUtility:
         res = self.execute_get_db_query(self.sConn.cursor, query, {"codes": codes}, return_cols=False)
 
         if len(res) != 0:
+
+            self.logger.info('All Micronic Codes are valid!')
+
             # if all micronic codes were found, return linked records (list of objects) with micronic code and
             # extraction numbers
 
@@ -287,21 +328,26 @@ class dbUtility:
                 res = sorted(res, key=lambda x: code_order[x[1]])
 
                 result_dict = [{'extraction number': i[0], 'micronic code': i[1]} for i in res]
-
+                self.logger.info(result_dict)
                 return result_dict, valid
 
             # some invalid codes
             else:
                 valid = False
+                self.logger.info('Invalid or unlinked Micronic Codes detected!')
                 invalid_codes = [{'invalid/unlinked micronic codes': j} for j in codes if j not in [i[1] for i in res]]
                 return invalid_codes, valid
         # all invalid codes
         else:
             valid = False
+            self.logger.info('All Micronic Codes are invalid or unlinked')
             return [{'invalid/unlinked micronic codes': i} for i in codes], valid
 
     # function to check if scanned in micronic code has already been assigned a location
     def check_micronic_code_assigned(self, tab_prefix, micronic_codes):
+
+        self.logger.info("Checking if Micronic Code has already been assigned...")
+
         assigned_codes = ''
         valid = True
 
@@ -321,16 +367,24 @@ class dbUtility:
         if res:
             valid = False
 
+            self.logger.warning("Micronic Code Duplication Check: Fail")
+
             # sort by order of appearance in micronic codes
             code_order = {code: i for i, code in enumerate(micronic_codes)}
             res = sorted(res, key=lambda x: code_order[x[2]])
 
             assigned_codes = [{'location': i[0] + '/' + i[1], 'micronic code': i[2], 'extraction number': i[3]} for i in res]
+            self.logger.warning("Already assigned Micronic Codes: {}".format(assigned_codes))
+        else:
+            self.logger.info('Micronic Code Duplication Check: Pass')
 
         return assigned_codes, valid
 
     # function to check if provided freezer box barcode is valid
     def check_freezer_barcode(self, table_type, fb_barcode):
+
+        self.logger.info("Box Barcode: {}".format(fb_barcode))
+        self.logger.info("Checking Freezer Box Barcode...")
 
         valid = True
 
@@ -344,13 +398,18 @@ class dbUtility:
 
         if len(res) == 0:
             valid = False
+            self.logger.warning('Provided Freezer Box Barcode is invalid')
             return '', valid
+
+        self.logger.info('Valid Freezer Box Barcode!')
 
         return res[0], valid
 
     # function to get occupied positions
     # if nothing is returned, that means it's a new box!
     def get_occupied_positions(self, table_type, fb_barcode):
+
+        self.logger.info("Getting occupied positions in the scanned in box...")
 
         query = '''
             WITH last_position AS (SELECT TOP 1 tubes.Location
@@ -374,6 +433,7 @@ class dbUtility:
         res = self.execute_get_db_query(self.sConn.cursor, query, {"barcode" : fb_barcode}, return_cols= False)
 
         if len(res) == 0:
+            self.logger.info("New box detected!")
             return ''
 
         occupied_positions = [i[0] for i in res]
@@ -396,7 +456,7 @@ class dbUtility:
             # RecordCreatedWhen
             datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
             # RecordCreatedBy
-            'WIN\\{}'.format(os.environ['WINDOWS_USERNAME'])
+            os.environ['WINDOWS_USERNAME']
         ) for row in rows]
 
         with self.sConn.cursor() as cursor:
@@ -406,6 +466,8 @@ class dbUtility:
 
     # function to update location column in Dna_extractions table with new location
     def update_assigned_location(self, rows):
+
+        self.logger.info('Updating location in the Dna_extractions table...')
 
         values = [(
             row['location'],
@@ -421,7 +483,7 @@ class dbUtility:
         with self.mConn.cursor() as cursor:
             cursor.executemany(query, values)
             self.mConn.commit()
-            print('{} records updated in Dna_extractions!'.format(cursor.rowcount))
+            self.logger.info('{} records updated in Dna_extractions!'.format(cursor.rowcount))
 
 #####################################################################################################################################################################
 
@@ -430,6 +492,8 @@ class dbUtility:
     # function to get all samples in a given box
     # used for verify tube location functionality
     def get_box_contents(self, fb_pk, prefix):
+
+        self.logger.info("Getting box contents...")
 
         query = '''
         SELECT Location, MicronicCode
@@ -576,6 +640,13 @@ class dbUtility:
 
     # wrapper function for getting and formatting tables from selected query type
     def get_database_records(self, query_type, input, sample=""):
+
+        base = "Query type selected: {}. Input value provided: {}. "
+
+        if query_type in ["Extraction #", 'Box Barcode #']:
+            base = base + "Sample type selected: {}."
+
+        self.logger.info(base.format(query_type, input, sample))
 
         match query_type:
             case "Extraction #":

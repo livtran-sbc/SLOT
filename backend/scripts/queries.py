@@ -8,14 +8,14 @@ write_queries = {
     'mc_dna_extraction_number': ['MT_DnaExtractionNumber', 'MicronicCode', 'RecordCreatedBy', 'RecordCreatedWhen', 'SampleType'],
     'gdna_micronic_tubes': location_assignment_cols,
     'chi_micronic_tubes': location_assignment_cols,
-    'ngs_run_info': ['FK_RunNumber', 'RunSampleNumber', 'Method', 'FK_TestMtilda', 'DnaExtractionNumber']
+    'ngs_run_info': ['FK_RunNumber', 'RunSampleNumber', 'Method', 'FK_TestMtilda', 'DnaExtractionNumber'],
+    'audit_log': ['event_type', 'event_details', 'sunet_id', 'dts', 'status']
 }
 
 def build_insert_query(table):
 
     cols = write_queries.get(table)
     values = ', '.join(['%s'] * len(cols))
-
 
     query = '''
         INSERT INTO {} ({})
