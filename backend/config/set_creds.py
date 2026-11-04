@@ -16,3 +16,7 @@ def set_env_vars():
 
     for k,v in config.items():
         os.environ[k] = ssm.get_parameter(Name=v, WithDecryption=True)['Parameter']['Value']
+
+    # this may be removed after authentication is added
+    import subprocess
+    os.environ['WINDOWS_USERNAME'] = "WIN\\{}".format(subprocess.run('whoami', capture_output=True).stdout.strip().decode().split('\\')[1])
