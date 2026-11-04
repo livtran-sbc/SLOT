@@ -168,9 +168,7 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
     # front end will check the following in sequential order:
     # micronic code validity --> return micronic codes error if any are invalid
     # freezer box barcode validity --> return error if fb barcode is not valid
-    # number of samples exceeding number of available spots --> num_slots_valid will be False
     mc_valid = True
-    num_slots_valid = True
     new_slots = ''
 
     fb_details, fb_valid = db.check_freezer_barcode(table_prefix, barcode)
@@ -180,8 +178,6 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
 
         # occupied slots in existing box
         filled_slots = db.get_occupied_positions(table_prefix, barcode)
-
-        num_occupied_slots = len(filled_slots)
 
         new_slots = [i for i in en_mcodes if i.get('location') not in filled_slots]
 
@@ -198,11 +194,6 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
             fb_pk, box = fb_details
 
             from scripts.data_util import dataUtil
-
-            num_slots_valid = (num_occupied_slots + len(new_slots)) <= 96
-
-            # if assignment_array is empty, it means the number of samples provided exceeds the number of available slots
-            if num_slots_valid:
 
                 table_name = '{}_micronic_tubes'.format(table_prefix)
 
@@ -247,7 +238,6 @@ def assign_freezer_location(request: FreezerMicronicWriteRequests):
         'mcValid': mc_valid,
         'fbValid': fb_valid,
         'newSlots': len(new_slots),
-        'numSlotsValid': num_slots_valid,
         'results': data
     }
 

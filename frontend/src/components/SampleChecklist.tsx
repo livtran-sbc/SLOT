@@ -193,8 +193,6 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
 
           const locationCode = Object.fromEntries(dataArray.map(r => [r['micronic code'], r['location']]))
 
-          console.log(dataArray)
-
           updateTabInputs(tabNum, {
             locationMicronicCodes: dataArray,
             extractionNumbersMicronicCodes: data['results'].map((row: {'extraction number': string, 'micronic code': string}) => ({...row, 'location': locationCode[row['micronic code']]})),
@@ -337,40 +335,7 @@ export default function SampleChecklist({ tabNum }: SampleChecklistTabs) {
             </>,
           );
         } else {
-          if (data.numSlotsValid) {
             updateTabInputs(tabNum, { returnedData: data.results });
-          } else {
-            showError(
-              <>
-                <h5 style={{ marginBottom: "15px" }}>
-                  Sample Location Assignment Error!
-                </h5>
-                <div className="error-message-margin">
-                  <p className="error-message-font">
-                    <span style={{ background: "yellow" }}>
-                      Number of new samples detected 
-                    </span>
-                    : <span style={{ color: "red" }}>{ data.newSlots}</span>
-                  </p>
-                  <p className="error-message-font">
-                    <span style={{ background: "yellow" }}>
-                      Remaining slots in Freezer Box 
-                    </span>
-                    : 
-                    <span style={{ color: "red" }}>
-                      { data.results[0]["remaining slots"]}
-                    </span>
-                  </p>
-
-                  <p className="error-extended-message">
-                    The number of samples to be assigned exceeds the number of
-                    available slots in the scanned box. Please double check the
-                    scanned in box's inventory.
-                  </p>
-                </div>
-              </>,
-            );
-          }
         }
       }
     } catch (error) {
