@@ -124,7 +124,7 @@ class dbUtility:
     # column are genomic dna samples
     def check_extraction_number_valid(self, extraction_numbers, db_extraction_numbers):
 
-        self.logger.warning("Checking validity of provided extraction numbers...")
+        self.logger.info("Checking validity of provided extraction numbers...")
 
         extraction_numbers_split = [num for num in extraction_numbers.split(',')]
 
