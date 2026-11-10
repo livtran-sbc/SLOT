@@ -9,10 +9,14 @@ import os
 
 # this section needs to be before the logger is established so the 'WINDOWS_USERNAME' environment variable
 # can be properly set
-if 'SERVER' not in os.environ:
+if 'MTILDA_SERVER' not in os.environ:
     from config.set_creds import set_env_vars
     #print('IN DEV -- SETTING ENVIRONMENT VARIABLES')
     set_env_vars()
+
+# this may be removed after authentication is added
+import subprocess
+os.environ['WINDOWS_USERNAME'] = "WIN\\{}".format(subprocess.run('whoami', capture_output=True).stdout.strip().decode().split('\\')[1])
 
 from scripts.logger import get_logger
 lgr = get_logger()
@@ -208,6 +212,8 @@ def assign_freezer_barcode(request: FBWriteRequests):
     # returns '' if not less 24 boxes
     # else returns a string with the freezer name and number of boxes left for the freezer
     last_boxes = db.check_last_boxes(current_box_name, table)
+
+    other_message = None
 
     if last_boxes != "":
         other_message = ["info", last_boxes]
