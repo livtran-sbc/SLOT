@@ -60,6 +60,8 @@ async def exception_handler(request: Request, e: Exception):
 @app.get('/api/validate-micronic-file')
 def validate_micronic_file(micronic_codes: str):
 
+    lgr.info('***** Validate Micronic File API call made! *****')
+
     lgr.info("Validating uploaded Micronic Output file...")
 
     # check if micronic code exists (i.e. has it been linked? or was the code scanned in incomplete?) and get extraction number
@@ -68,6 +70,8 @@ def validate_micronic_file(micronic_codes: str):
     data, validity_check = db.get_extraction_numbers(micronic_codes)
 
     lgr.info("Finished validating Micronic Output file!")
+
+    lgr.info('***** Validate Micronic File API call completed! *****')
 
     return {
         'valid': validity_check,
