@@ -36,14 +36,14 @@ class dbUtility:
             cursor.execute(query, params)
             res = cursor.fetchall()
 
+            self.logger.info("DB Query successfully executed!")
+
             if return_cols:
                 cols = [col for col in cursor.description]
                 # header formatting for query db functionalities
                 if table_cols:
                     cols = [re.sub('_', ' ', col[0]) for col in cols]
                 return cols, res
-
-        self.logger.info("DB Query successfully executed!")
 
         return res
 
@@ -336,11 +336,14 @@ class dbUtility:
                 valid = False
                 self.logger.info('Invalid or unlinked Micronic Codes detected!')
                 invalid_codes = [{'invalid/unlinked micronic codes': j} for j in codes if j not in [i[1] for i in res]]
+                self.logger.info(invalid_codes)
                 return invalid_codes, valid
         # all invalid codes
         else:
             valid = False
             self.logger.info('All Micronic Codes are invalid or unlinked')
+            invalid_codes = [{'invalid/unlinked micronic codes': i} for i in codes]
+            self.logger.info(invalid_codes)
             return [{'invalid/unlinked micronic codes': i} for i in codes], valid
 
     # function to check if scanned in micronic code has already been assigned a location
